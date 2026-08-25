@@ -57,6 +57,8 @@ namespace Content.Server.Zombies
             SlotFlags.INNERCLOTHING |
             SlotFlags.OUTERCLOTHING | // Starlight
             SlotFlags.OUTERCLOTHING2; // Starlight
+        
+        private int _bloodInfectionLevel = 0;
 
         public override void Initialize()
         {
