@@ -20,7 +20,9 @@ public sealed partial class ZombieComponent : Component
     /// The baseline infection chance you have if you have no protective gear
     /// </summary>
     [DataField]
-    public float BaseZombieInfectionChance = 0.75f;
+    //change start
+    public float BaseZombieInfectionChance = 0.8f;
+    //change end
 
     /// <summary>
     /// The minimum infection chance possible. This is simply to prevent
