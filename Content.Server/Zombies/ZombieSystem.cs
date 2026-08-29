@@ -27,6 +27,7 @@ using Robust.Shared.Random;
 using Robust.Shared.Timing;
 using Content.Shared._Starlight.Language.Components;
 using Content.Server._Starlight.Medical.Body.Systems;
+using Content.Shared.Damage;
 
 namespace Content.Server.Zombies
 {
@@ -58,7 +59,6 @@ namespace Content.Server.Zombies
             SlotFlags.OUTERCLOTHING | // Starlight
             SlotFlags.OUTERCLOTHING2; // Starlight
         
-        private int _bloodInfectionLevel = 0;
 
         public override void Initialize()
         {
@@ -99,9 +99,13 @@ namespace Content.Server.Zombies
             if (HasComp<ZombieComponent>(uid) || HasComp<ZombieImmuneComponent>(uid))
                 return;
 
-            EnsureComp<PendingZombieComponent>(uid, out PendingZombieComponent pendingComp);
-
-            pendingComp.GracePeriod = _random.Next(pendingComp.MinInitialInfectedGrace, pendingComp.MaxInitialInfectedGrace);
+            //change start
+            var infection = EnsureComp<BloodStreamInfectionComponent>(uid);
+            //currently commentred out because if i read it all correctly you cannot turn yourself on command without this. currently set for "collapse randomly and rise" rather than enter medbay and istantly turn>bite everyone
+            //EnsureComp<IncurableZombieComponent>(uid);
+            infection.InfectiousBiteCount = 3;
+            infection.IsInitialInfected = true;
+            //change end
         }
 
         private void OnPendingMapInit(EntityUid uid, PendingZombieComponent component, MapInitEvent args)
@@ -120,29 +124,60 @@ namespace Content.Server.Zombies
             base.Update(frameTime);
             var curTime = _timing.CurTime;
 
-            // Hurt the living infected
-            var query = EntityQueryEnumerator<PendingZombieComponent, Shared.Damage.Components.DamageableComponent, MobStateComponent>();
-            while (query.MoveNext(out var uid, out var comp, out var damage, out var mobState))
+            //change start
+            // Increment Infectionlevel for all infected entities
+            var infectionQuery = EntityQueryEnumerator<BloodStreamInfectionComponent, MobStateComponent, Shared.Damage.Components.DamageableComponent>(); 
+            while (infectionQuery.MoveNext(out var uid, out var infection, out var mobState, out var damage))
             {
-                // Process only once per second
-                if (comp.NextTick > curTime)
+                if (infection.NextTickTime > curTime)
                     continue;
+                infection.NextTickTime = curTime + TimeSpan.FromSeconds(1f);
 
-                comp.NextTick = curTime + TimeSpan.FromSeconds(1f);
+                float procChance = infection.IsInitialInfected ? 
+                    (_mobState.IsCritical(uid, mobState) ? .06f : 0.038f) :
+                    (_mobState.IsCritical(uid, mobState) ? 0.6f : 0.3f);
 
-                comp.GracePeriod -= TimeSpan.FromSeconds(1f);
-                if (comp.GracePeriod > TimeSpan.Zero)
-                    continue;
+                for (int i = 0; i < infection.InfectiousBiteCount; i++)
+                {
+                    if (_random.Prob(procChance))
+                    {
+                        infection.InfectionLevel += 1f;
+                    }
+                }
 
-                if (_random.Prob(comp.InfectionWarningChance))
-                    _popup.PopupEntity(Loc.GetString(_random.Pick(comp.InfectionWarnings)), uid, uid);
+                if (infection.InfectionLevel > 100f)
+                {
+                    infection.InfectionLevel = 100f;
+                }
 
-                var multiplier = _mobState.IsCritical(uid, mobState)
-                    ? comp.CritDamageMultiplier
-                    : 1f;
+                if (infection.InfectionLevel >= 60f)
+                {
+                    var damageAmount = infection.IsInitialInfected ? 
+                    (_mobState.IsCritical(uid, mobState) ? 0.1f : 0.3f) :
+                    (_mobState.IsCritical(uid, mobState) ? 0.1f : 0.3f);
+                    
+                    if (_mobState.IsDead(uid, mobState) == false)
+                    { 
+                        _damageable.TryChangeDamage(uid, new DamageSpecifier
+                        {
+                            DamageDict = new()
+                            {
+                                { "Poison", damageAmount }
+                            }
+                        }, 
+                        true, false);
+                    }
 
-                _damageable.ChangeDamage((uid, damage), comp.Damage * multiplier, true, false);
+                }
+
+                if (infection.InfectionLevel >= 100f)
+                {
+                    ZombifyEntity(uid);
+                }
             }
+            //change end
+
+
 
             // Heal the zombified
             var zombQuery = EntityQueryEnumerator<ZombieComponent, Shared.Damage.Components.DamageableComponent, MobStateComponent>();
@@ -277,11 +312,14 @@ namespace Content.Server.Zombies
                     _damageable.TryChangeDamage(args.User, entity.Comp.HealingOnBite, true, false);
 
                     // If we cannot infect the living target, the zed will just heal itself.
+                    //(croggler)note for myself since i forgot earlier, this is where it checks the infection chance
                     if (HasComp<ZombieImmuneComponent>(uid) || cannotSpread || !_random.Prob(GetZombieInfectionChance(uid, entity.Comp)))
                         continue;
 
-                    EnsureComp<PendingZombieComponent>(uid);
-                    EnsureComp<ZombifyOnDeathComponent>(uid);
+                    //change start
+                    var infection = EnsureComp<BloodStreamInfectionComponent>(uid);
+                    infection.InfectiousBiteCount += 1;
+                    //change end
                 }
                 else
                 {
@@ -289,9 +327,19 @@ namespace Content.Server.Zombies
                     || !_random.Prob(GetZombieInfectionChance(uid, entity.Comp))) //Starlight fix: Infection-proof suits don't just lose their resistance on death.
                         continue;
 
-                    // If the target is dead and can be infected, infect.
-                    ZombifyEntity(uid);
+                    //change start
+                    // If the target is dead and can be infected, infect and increment infection. 
+                    //(unless the zombie sits there hitting it like 10 times about it wont rise immediately, if they stand there hitting it it serves the same purpose as not immediately raising so thats fine)
+                    //once crit it should be approx 3-5 infectious bites at 80% chance while not crit, 3 bites is 3*60% chance to increment zombification by 1, so between 1-3 infection per second
+                    //which is approximately 30-100s if they stop biting immediately. if they bite the dead body twice at the 3, its 5 bites at 60%, plus 20 initial, which, im not calculating just guessing, should be like, 60s max?
+                    //this does hurt snowballing a lot, but it can be changed to balance. it's here so that if its a firefight and someone gets crit but not zombified, they can turn once dragged back to safety in compensation for the slower snowball
+                    //otherwise 10 bites on crit and they zombify(probably 8-9 bites tbh)
+                    //so no snowballing during firefights, but prolonged further turning after
+                    var infection = EnsureComp<BloodStreamInfectionComponent>(uid);
+                    infection.InfectiousBiteCount += 1;
+                    infection.InfectionLevel += 10f;
                     args.Handled = true;
+                    //change end
                 }
             }
         }
