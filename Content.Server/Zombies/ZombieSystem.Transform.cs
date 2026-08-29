@@ -98,7 +98,8 @@ public sealed partial class ZombieSystem
     {
         if (args.NewMobState == MobState.Dead)
         {
-            ZombifyEntity(uid, args.Component);
+            //no zombifyondeath - i cannot find the initial infected event to prevent this comp from being added so this is my solution
+            //ZombifyEntity(uid, args.Component);
         }
     }
 

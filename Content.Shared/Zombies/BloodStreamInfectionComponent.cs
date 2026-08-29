@@ -28,7 +28,13 @@ public sealed partial class BloodStreamInfectionComponent : Component
     [ViewVariables(VVAccess.ReadWrite), DataField("isInitialInfected")]
     public bool IsInitialInfected { get; set; } = false;
 
+    public float BloodLevel { get; set; } = 1f;
 
+    public float PreviousBloodLevel { get; set; } = 1f;
+
+    public float BloodLossRatio { get; set; } = 1f;
+
+    public float ProcChance { get; set; } = 0f;
 
     //pulled from pendingzombiecomponent start
     /// <summary>

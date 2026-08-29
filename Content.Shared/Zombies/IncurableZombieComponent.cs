@@ -9,7 +9,7 @@ namespace Content.Shared.Zombies;
 [RegisterComponent]
 public sealed partial class IncurableZombieComponent : Component
 {
-    [DataField]
+    
     public EntProtoId ZombifySelfActionPrototype = "ActionTurnUndead";
 
     [DataField]

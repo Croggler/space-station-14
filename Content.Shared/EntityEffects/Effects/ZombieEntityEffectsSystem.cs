@@ -16,8 +16,8 @@ public sealed partial class CauseZombieInfectionEntityEffectsSystem : EntityEffe
         if (HasComp<ZombieImmuneComponent>(entity) || HasComp<IncurableZombieComponent>(entity))
             return;
 
-        EnsureComp<ZombifyOnDeathComponent>(entity);
-        EnsureComp<PendingZombieComponent>(entity);
+        var infection =EnsureComp<BloodStreamInfectionComponent>(entity);
+        infection.InfectiousBiteCount = 5;
     }
 }
 
@@ -35,6 +35,7 @@ public sealed partial class CureZombieInfectionEntityEffectsSystem : EntityEffec
 
         RemComp<ZombifyOnDeathComponent>(entity);
         RemComp<PendingZombieComponent>(entity);
+        RemComp<BloodStreamInfectionComponent>(entity);
 
         if (args.Effect.Innoculate)
             EnsureComp<ZombieImmuneComponent>(entity);
