@@ -29,6 +29,7 @@ using Robust.Shared.Timing;
 using Content.Shared._Starlight.Language.Components;
 using Content.Server._Starlight.Medical.Body.Systems;
 using Content.Shared.Damage;
+using Content.Shared.Chemistry.EntitySystems;
 
 namespace Content.Server.Zombies
 {
@@ -46,6 +47,7 @@ namespace Content.Server.Zombies
         [Dependency] private MobStateSystem _mobState = default!;
         [Dependency] private SharedPopupSystem _popup = default!;
         [Dependency] private SharedRoleSystem _role = default!;
+        [Dependency] private SharedSolutionContainerSystem _solutionContainer = default!;
 
         public readonly ProtoId<NpcFactionPrototype> Faction = "Zombie";
 
@@ -145,15 +147,17 @@ namespace Content.Server.Zombies
                     //Medieval bloodletting basically, drop your bloodlevel by 50%, drop the infection by the same percent. a painful, yet possible way to drop infection level
                     //inside the "not a zombie yet block" because if you have a zombified heart your blood is entirely infected
                     //more related to this in the part of this block that zombifies you
-                    //commented out for now because i dont want to figure out the organ system just yet
+                    
 
-                    //infection.BloodLevel = _bloodstream.GetBloodLevel(uid);
-                    //if (infection.BloodLevel > 0f)
-                    //{
-                    //    infection.BloodLossRatio = infection.BloodLevel / infection.PreviousBloodLevel;
-                    //    infection.InfectionLevel *= infection.BloodLossRatio;
-                    //}
-                    //infection.PreviousBloodLevel = infection.BloodLevel;
+                    infection.BloodLevel = _bloodstream.GetBloodLevel(uid);
+                    
+
+                    if (infection.BloodLevel > 0f)
+                    {
+                        infection.BloodLossRatio = infection.BloodLevel / infection.PreviousBloodLevel;
+                        infection.InfectionLevel *= infection.BloodLossRatio;
+                    }
+                    infection.PreviousBloodLevel = infection.BloodLevel;
 
                     var isDead = _mobState.IsDead(uid, mobState);
                     var isCritical = _mobState.IsCritical(uid, mobState);
@@ -170,9 +174,41 @@ namespace Content.Server.Zombies
                         }
                     }
 
-                    if (infection.InfectionLevel > 100f)
+                    if (TryComp<BloodstreamComponent>(uid, out var bloodstream)
+                        && _solutionContainer.ResolveSolution(
+                            uid,
+                            bloodstream.BloodSolutionName,
+                            ref bloodstream.BloodSolution,
+                            out var bloodSolution))
+                        {
+                            if (bloodSolution.ContainsReagent("Ambuzol", null) && infection.MaximumSet == false)
+                            {
+                                infection.MaximumInfectionLevel = infection.InfectionLevel;
+                                infection.MaximumSet = true;
+                            }
+                            else if (bloodSolution.ContainsReagent("Ambuzol", null) == false && infection.MaximumSet == true)
+                            {
+                                infection.MaximumInfectionLevel = 100f;
+                                infection.MaximumSet = false;
+                            }
+                        }
+
+                    if (infection.InfectionLevel > infection.MaximumInfectionLevel)
                     { 
-                        infection.InfectionLevel = 100f;
+
+                        if (TryComp<BloodstreamComponent>(uid, out var bloodStream)
+                            && _solutionContainer.ResolveSolution(uid, bloodStream.BloodSolutionName, ref bloodStream.BloodSolution, out var bloodStreamSolution)
+                        )
+                        {
+                            var excessInfectionLevel = infection.InfectionLevel - infection.MaximumInfectionLevel;
+                            var burnAmount = excessInfectionLevel * 0.25f;
+                            var removed = bloodStreamSolution.RemoveReagent("Ambuzol", burnAmount);
+                            
+                        }
+
+
+                        infection.InfectionLevel = infection.MaximumInfectionLevel;
+
                     }
 
                     if (infection.InfectionLevel >= 60f)
@@ -192,7 +228,6 @@ namespace Content.Server.Zombies
                             }, 
                             true, false);
                         }
-
                     }
                     
 
@@ -204,7 +239,7 @@ namespace Content.Server.Zombies
                         //then drop infectionlevel to 0, which will then trigger removal of zombification
                         //commented out for now because i dont want to figure out the organ system just yet
 
-                        //infection.PreviousBloodLevel = 1f;
+                        infection.PreviousBloodLevel = 1f;
                     }
                 }
                 if (HasComp<ZombieComponent>(uid))

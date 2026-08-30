@@ -1,0 +1,9 @@
+- type: entity
+  id: OrganZombieHeart
+  parent: OrganHumanHeart
+  name: Zombified heart
+  suffix: Zombie
+  components:
+  - type: Sprite
+    sprite: Mobs/Species/Human/organs.rsi
+    state: heart

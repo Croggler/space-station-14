@@ -36,6 +36,12 @@ public sealed partial class BloodStreamInfectionComponent : Component
 
     public float ProcChance { get; set; } = 0f;
 
+    //important for ambuzol rework. makes it so the current is set to max when ambuzol is present in system, reverted to max 100 once ambuzol leaves system
+    [ViewVariables(VVAccess.ReadWrite), DataField("MaximumInfectionLevel")]
+    public float MaximumInfectionLevel { get; set; } = 100f;
+
+    public bool MaximumSet { get; set; } = false;
+
     //pulled from pendingzombiecomponent start
     /// <summary>
     /// The chance each second that a warning will be shown.
