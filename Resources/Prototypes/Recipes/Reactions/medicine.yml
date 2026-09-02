@@ -217,17 +217,23 @@
       amount: 2
   products:
     Ambuzol: 4
-
+#Starlight
 - type: reaction
   id: AmbuzolPlus
   reactants:
     Ambuzol:
-      amount: 5
+      amount: 1
     Omnizine:
-      amount: 5
+      amount: 1
+    ZombieHeartSlurry:
+      amount: 1
+    ZombiePlasma:
+      amount: 1
+    Amatoxin:
+      amount: 1
   products:
-    AmbuzolPlus: 10
-
+    AmbuzolPlus: 5
+#starlight end
 - type: reaction
   id: Synaptizine
   reactants:

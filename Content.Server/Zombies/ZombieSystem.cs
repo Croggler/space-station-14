@@ -30,6 +30,18 @@ using Content.Shared._Starlight.Language.Components;
 using Content.Server._Starlight.Medical.Body.Systems;
 using Content.Shared.Damage;
 using Content.Shared.Chemistry.EntitySystems;
+//#starlight start
+using System.Linq;
+using Content.Shared.Body.Organ;
+using Content.Shared._Starlight.Medical.Surgery.Events;
+using Content.Shared.Body.Part;
+using Content.Shared.NPC.Components;
+using Content.Shared.Interaction.Components;
+using Content.Shared.Body.Systems;
+using Robust.Shared.Containers;
+using Content.Shared.FixedPoint;
+//#starlight end
+
 
 namespace Content.Server.Zombies
 {
@@ -48,6 +60,8 @@ namespace Content.Server.Zombies
         [Dependency] private SharedPopupSystem _popup = default!;
         [Dependency] private SharedRoleSystem _role = default!;
         [Dependency] private SharedSolutionContainerSystem _solutionContainer = default!;
+        [Dependency] private BodySystem _body = default!;
+        [Dependency] private SharedContainerSystem _containers = default!;
 
         public readonly ProtoId<NpcFactionPrototype> Faction = "Zombie";
 
@@ -61,7 +75,7 @@ namespace Content.Server.Zombies
             SlotFlags.INNERCLOTHING |
             SlotFlags.OUTERCLOTHING | // Starlight
             SlotFlags.OUTERCLOTHING2; // Starlight
-        
+
 
         public override void Initialize()
         {
@@ -96,22 +110,22 @@ namespace Content.Server.Zombies
 
         private void OnPendingMapInit(EntityUid uid, IncurableZombieComponent component, MapInitEvent args)
         {
-            
+
             // _actions.AddAction(uid, ref component.Action, component.ZombifySelfActionPrototype);
             _faction.AddFaction(uid, Faction);
 
             if (HasComp<ZombieComponent>(uid) || HasComp<ZombieImmuneComponent>(uid))
                 return;
 
-            
+
             var infection = EnsureComp<BloodStreamInfectionComponent>(uid);
-            //currently commented out because if i read it all correctly you cannot turn yourself on command without this. 
+            //currently commented out because if i read it all correctly you cannot turn yourself on command without this.
             //currently set for "collapse randomly and rise" rather than enter medbay and istantly turn>bite everyone
             //leaving incurablezombiecomponent and pendingzombiecomponent in files because i think they're connected to the init event and have no clue on changing that
             //EnsureComp<IncurableZombieComponent>(uid);
             infection.InfectiousBiteCount = 3;
             infection.IsInitialInfected = true;
-            
+
 
         }
 
@@ -131,9 +145,9 @@ namespace Content.Server.Zombies
             base.Update(frameTime);
             var curTime = _timing.CurTime;
 
-            
+            //#starlight Start
             // Increment Infectionlevel for all infected entities
-            var infectionQuery = EntityQueryEnumerator<BloodStreamInfectionComponent, MobStateComponent, Shared.Damage.Components.DamageableComponent>(); 
+            var infectionQuery = EntityQueryEnumerator<BloodStreamInfectionComponent, MobStateComponent, Shared.Damage.Components.DamageableComponent>();
             while (infectionQuery.MoveNext(out var uid, out var infection, out var mobState, out var damage))
             {
                 if (infection.NextTickTime > curTime)
@@ -147,15 +161,16 @@ namespace Content.Server.Zombies
                     //Medieval bloodletting basically, drop your bloodlevel by 50%, drop the infection by the same percent. a painful, yet possible way to drop infection level
                     //inside the "not a zombie yet block" because if you have a zombified heart your blood is entirely infected
                     //more related to this in the part of this block that zombifies you
-                    
+
 
                     infection.BloodLevel = _bloodstream.GetBloodLevel(uid);
-                    
 
-                    if (infection.BloodLevel > 0f)
+
+                    if (infection.BloodLevel > infection.PreviousBloodLevel)
                     {
                         infection.BloodLossRatio = infection.BloodLevel / infection.PreviousBloodLevel;
-                        infection.InfectionLevel *= infection.BloodLossRatio;
+                        if (infection.BloodLossRatio < 0f)
+                            infection.InfectionLevel *= infection.BloodLossRatio;
                     }
                     infection.PreviousBloodLevel = infection.BloodLevel;
 
@@ -194,7 +209,7 @@ namespace Content.Server.Zombies
                         }
 
                     if (infection.InfectionLevel > infection.MaximumInfectionLevel)
-                    { 
+                    {
 
                         if (TryComp<BloodstreamComponent>(uid, out var bloodStream)
                             && _solutionContainer.ResolveSolution(uid, bloodStream.BloodSolutionName, ref bloodStream.BloodSolution, out var bloodStreamSolution)
@@ -203,7 +218,7 @@ namespace Content.Server.Zombies
                             var excessInfectionLevel = infection.InfectionLevel - infection.MaximumInfectionLevel;
                             var burnAmount = excessInfectionLevel * 0.25f;
                             var removed = bloodStreamSolution.RemoveReagent("Ambuzol", burnAmount);
-                            
+
                         }
 
 
@@ -213,44 +228,121 @@ namespace Content.Server.Zombies
 
                     if (infection.InfectionLevel >= 60f)
                     {
-                        var damageAmount = infection.IsInitialInfected ? 
-                        (_mobState.IsCritical(uid, mobState) ? 0.1f : 0.3f) :
-                        (_mobState.IsCritical(uid, mobState) ? 0.1f : 0.3f);
-                        
+                        var damageAmount = infection.IsInitialInfected ?
+                        (_mobState.IsCritical(uid, mobState) ? 0.1f : 0.4f) :
+                        (_mobState.IsCritical(uid, mobState) ? 0.1f : 0.4f);
+
                         if (_mobState.IsDead(uid, mobState) == false)
-                        { 
+                        {
                             _damageable.TryChangeDamage(uid, new DamageSpecifier
                             {
                                 DamageDict = new()
                                 {
                                     { "Poison", damageAmount }
                                 }
-                            }, 
+                            },
                             true, false);
                         }
                     }
-                    
+
+                    if (TryComp<MobThresholdsComponent>(uid, out var thresholds)
+                        && _mobThreshold.TryGetThresholdForState(
+                            uid,
+                            MobState.Critical,
+                            out var originalCriticalThreshold,
+                            thresholds))
+                    {
+                        infection.OriginalCriticalThreshold = originalCriticalThreshold.Value;
+
+                        _mobThreshold.SetMobStateThreshold(
+                            uid,
+                            FixedPoint2.New(2),
+                            MobState.Critical,
+                            thresholds);
+                    }
+
 
                     if (infection.InfectionLevel >= 100f)
                     {
+                        var currentState = EnsureComp<PreZombificationValuesComponent>(uid);
+                        if (TryComp(uid, out BloodstreamComponent? bloodstream2))
+                        {
+                            currentState.BeforeZombifiedBloodReagents = bloodstream2.BloodReferenceSolution;
+                            currentState.BloodlossThreshold = bloodstream2.BloodlossThreshold;
+                        }
+                        if (TryComp<NpcFactionMemberComponent>(uid, out var factionMember))
+                            currentState.OriginalFactions = factionMember.Factions.ToList();
+
+                        _mobThreshold.SetMobStateThreshold(
+                            uid,
+                            infection.OriginalCriticalThreshold,
+                            MobState.Critical,
+                            thresholds);
                         ZombifyEntity(uid);
-
-                        //sets previous to 1 here, so when the heart is removed the next bloodlevel check will see the 0 current blood, 
-                        //then drop infectionlevel to 0, which will then trigger removal of zombification
-                        //commented out for now because i dont want to figure out the organ system just yet
-
                         infection.PreviousBloodLevel = 1f;
+
+                        if (!TryComp<BodyComponent>(uid, out var bodyPartComp))
+                            return;
+
+                        var chestPart = bodyPartComp.RootContainer.ContainedEntities.FirstOrDefault();
+
+                        if (chestPart == EntityUid.Invalid || !TryComp<BodyPartComponent>(chestPart, out var bodyPart))
+                            return;
+
+                        var heartContainerId = SharedBodySystem.GetOrganContainerId("heart");
+
+                        if (_containers.TryGetContainer(chestPart, heartContainerId, out var heartContainer)
+                            && heartContainer.ContainedEntities.FirstOrDefault() is var oldHeart
+                            && oldHeart != EntityUid.Invalid
+                            && TryComp<OrganComponent>(oldHeart, out var oldHeartOrgan)
+                            && _body.RemoveOrgan(oldHeart, oldHeartOrgan))
+                        {
+                            QueueDel(oldHeart);
+                        }
+
+
+                        var newHeartId = Spawn("OrganZombieHeart", Transform(chestPart).Coordinates);
+                        if (TryComp<OrganComponent>(newHeartId, out var newHeartOrgan))
+                        {
+                            if (_body.InsertOrgan(chestPart, newHeartId, "heart", bodyPart, newHeartOrgan))
+                            {
+                                var ev = new SurgeryOrganImplantationCompleted(uid, chestPart, newHeartId);
+                                RaiseLocalEvent(newHeartId, ref ev);
+                            }
+                            else
+                            {
+                                QueueDel(newHeartId);
+                                return;
+                            }
+                        }
                     }
                 }
+
                 if (HasComp<ZombieComponent>(uid))
                 {
-                    
+                    if (!TryComp<BodyComponent>(uid, out var bodyComp))
+                        return;
+                    var chestPart = bodyComp.RootContainer.ContainedEntities.FirstOrDefault();
+                    TryComp<BodyPartComponent>(chestPart, out var bodyPart);
+
+                    var currentBloodLevel = _bloodstream.GetBloodLevel(uid);
+
+                    var heartContainerId = SharedBodySystem.GetOrganContainerId("heart");
+                    var hasHeart = _containers.TryGetContainer(chestPart, heartContainerId, out var heartContainer)
+                        && heartContainer.ContainedEntities.Any();
+                    if (currentBloodLevel <= 0.01f && !hasHeart)
+                    {
+                        TryComp<ZombieComponent>(uid, out var zombiecomp);
+                        RemComp<BloodStreamInfectionComponent>(uid);
+                        UnZombifyInPlace(uid, zombiecomp);
+                    }
                 }
 
 
 
             }
-            
+            //#starlight end
+
 
 
 
@@ -391,10 +483,10 @@ namespace Content.Server.Zombies
                     if (HasComp<ZombieImmuneComponent>(uid) || cannotSpread || !_random.Prob(GetZombieInfectionChance(uid, entity.Comp)))
                         continue;
 
-                    
+
                     var infection = EnsureComp<BloodStreamInfectionComponent>(uid);
                     infection.InfectiousBiteCount += 1;
-                    
+
                 }
                 else
                 {
@@ -402,8 +494,9 @@ namespace Content.Server.Zombies
                     || !_random.Prob(GetZombieInfectionChance(uid, entity.Comp))) //Starlight fix: Infection-proof suits don't just lose their resistance on death.
                         continue;
 
-                    
-                    // If the target is dead and can be infected, infect and increment infection. 
+
+                    //#starlight start
+                    // If the target is dead and can be infected, infect and increment infection.
                     //(unless the zombie sits there hitting it like 10 times about it wont rise immediately, if they stand there hitting it it serves the same purpose as not immediately raising so thats fine)
                     //once crit it should be approx 3-5 infectious bites at 80% chance while not crit, 3 bites is 3*60% chance to increment zombification by 1, so between 1-3 infection per second
                     //which is approximately 30-100s if they stop biting immediately. if they bite the dead body twice at the 3, its 5 bites at 60%, plus 20 initial, which, im not calculating just guessing, should be like, 60s max?
@@ -414,7 +507,8 @@ namespace Content.Server.Zombies
                     infection.InfectiousBiteCount += 1;
                     infection.InfectionLevel += 10f;
                     args.Handled = true;
-                    
+                    //#starlight end
+
                 }
             }
         }
@@ -427,7 +521,7 @@ namespace Content.Server.Zombies
         /// <param name="zombiecomp"></param>
         /// <remarks>
         ///     this currently only restore the skin/eye color from before zombified
-        ///     TODO: completely rethink how zombies are done to allow reversal.
+        ///     TODO: completely rethink how zombies are done to allow reversal.  #startlight - done/partially done. updated to basically retain the zombification effects but turn back to crew
         /// </remarks>
         public bool UnZombify(EntityUid source, EntityUid target, ZombieComponent? zombiecomp)
         {
@@ -446,8 +540,52 @@ namespace Content.Server.Zombies
             _humanoidAppearance.SetSkinColor(target, zombiecomp.BeforeZombifiedSkinColor, false);
             _bloodstream.ChangeBloodReagents(target, zombiecomp.BeforeZombifiedBloodReagents);
             _language.RestoreCache((target, EnsureComp<LanguageCacheComponent>(target))); //Starlight UnZombiby fix
+
             return true;
         }
+
+
+        //#starlight start
+        public bool UnZombifyInPlace(EntityUid target, ZombieComponent? zombiecomp)
+        {
+            if (!Resolve(target, ref zombiecomp))
+                return false;
+
+            foreach (var (layer, info) in zombiecomp.BeforeZombifiedCustomBaseLayers)
+            {
+                _humanoidAppearance.SetBaseLayerColor(target, layer, info.Color);
+                _humanoidAppearance.SetBaseLayerId(target, layer, info.Id);
+            }
+            if (TryComp<HumanoidAppearanceComponent>(target, out var appcomp))
+            {
+                appcomp.EyeColor = zombiecomp.BeforeZombifiedEyeColor;
+            }
+            _humanoidAppearance.SetSkinColor(target, zombiecomp.BeforeZombifiedSkinColor, false);
+            _bloodstream.ChangeBloodReagents(target, zombiecomp.BeforeZombifiedBloodReagents);
+            _language.RestoreCache((target, EnsureComp<LanguageCacheComponent>(target))); //Starlight UnZombiby fix
+
+
+
+            if (!TryComp<PreZombificationValuesComponent>(target, out var preStateComp))
+                return false;
+
+            RemComp<ZombieComponent>(target);
+
+            _bloodstream.SetBloodLossThreshold(target, preStateComp.BloodlossThreshold);
+            _faction.ClearFactions(target, dirty: false);
+            foreach (var faction in preStateComp.OriginalFactions)
+                _faction.AddFaction(target, faction);
+            EnsureComp<ComplexInteractionComponent>(target);
+            _nameMod.RefreshNameModifiers(target);
+            _identity.QueueIdentityUpdate(target);
+            _bloodstream.ChangeBloodReagents(target, preStateComp.BeforeZombifiedBloodReagents);
+
+            RemComp<PreZombificationValuesComponent>(target);
+
+
+            return true;
+        }
+        //#starlight end
 
         private void OnZombieCloning(Entity<ZombieComponent> ent, ref CloningEvent args)
         {

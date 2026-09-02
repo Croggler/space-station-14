@@ -1,4 +1,5 @@
 using Robust.Shared.GameStates;
+using Content.Shared.FixedPoint;
 
 namespace Content.Shared.Zombies;
 
@@ -23,7 +24,7 @@ public sealed partial class BloodStreamInfectionComponent : Component
 
     //Forced critical infection threshold (chance to go "oh shit, he's about to zombify" for medical staff before they zombify)
     [ViewVariables(VVAccess.ReadOnly), DataField("forcedCriticalStage")]
-    public float ForcedCriticalStage { get; set; } = 80f;
+    public float ForcedCriticalStage { get; set; } = 90f;
 
     [ViewVariables(VVAccess.ReadWrite), DataField("isInitialInfected")]
     public bool IsInitialInfected { get; set; } = false;
@@ -41,6 +42,7 @@ public sealed partial class BloodStreamInfectionComponent : Component
     public float MaximumInfectionLevel { get; set; } = 100f;
 
     public bool MaximumSet { get; set; } = false;
+    public FixedPoint2 OriginalCriticalThreshold { get; set; } = FixedPoint2.New(0.1);
 
     //pulled from pendingzombiecomponent start
     /// <summary>
